@@ -1,0 +1,47 @@
+# Ogni notte: prezzi di mercato TCGplayer di oggi (via tcgcsv.com) dei prodotti usati dall'app Trade Center, e i prezzi
+# Magic di Card Kingdom e Mana Pool (via MTGJSON, licenza MIT; set e numero da Scryfall).
+# tcgcsv aggiorna i dati verso le 20:00 UTC: si parte alle 04:30 UTC. Si può lanciare anche a mano (Actions > Run workflow).
+# L'archivio tiene solo l'ULTIMO file (un commit solo, riscritto ogni volta): niente storia che cresce ogni giorno.
+# Paracadute: se una delle due parti non riesce, l'altra si salva lo stesso e della parte mancata resta il file di ieri.
+name: prezzi del giorno
+on:
+  schedule:
+    - cron: '30 4 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: prezzi
+  cancel-in-progress: false
+jobs:
+  aggiorna:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Prezzi di oggi (TCGplayer)
+        id: tcg
+        continue-on-error: true
+        run: node aggiorna.mjs
+      - name: Prezzi Magic (Card Kingdom, Mana Pool)
+        id: mtg
+        continue-on-error: true
+        timeout-minutes: 20
+        run: node mtg.mjs --out mtg-prices.json --cache "$RUNNER_TEMP/mtg"
+      - name: Salva (un commit solo)
+        if: steps.tcg.outcome == 'success' || steps.mtg.outcome == 'success'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan nuovo
+          git add -A
+          git commit -m "Prezzi del $(date -u +%Y-%m-%d)"
+          git push -f origin HEAD:main
+      - name: Esito
+        if: steps.tcg.outcome != 'success' || steps.mtg.outcome != 'success'
+        run: |
+          echo "TCGplayer: ${{ steps.tcg.outcome }} · Magic: ${{ steps.mtg.outcome }}"
+          exit 1
